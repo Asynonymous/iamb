@@ -238,6 +238,18 @@ fn setup_screen(
     return Ok(ScreenState::new(win, cmd));
 }
 
+fn image_preview_status(store: &ChatStore, loading: Option<usize>) -> InfoMessage {
+    if !store.image_previews_visible {
+        InfoMessage::from("Image previews hidden")
+    } else if store.picker.is_none() {
+        InfoMessage::from("Image previews enabled, but no terminal image protocol was detected")
+    } else if let Some(count) = loading.filter(|count| *count > 0) {
+        InfoMessage::from(format!("Image previews shown; loading {count} existing previews"))
+    } else {
+        InfoMessage::from("Image previews shown")
+    }
+}
+
 /// The main application state and event loop.
 struct Application {
     /// Terminal backend.
@@ -580,6 +592,32 @@ impl Application {
                 self.screen.current_window_mut()?.focus_toggle();
 
                 None
+            },
+
+            IambAction::SetImagePreviews(visible) => {
+                let loading = if visible {
+                    let media = store.application.worker.client.media();
+                    store.application.enable_image_previews();
+                    Some(store.application.load_image_previews(self.store.clone(), media))
+                } else {
+                    store.application.image_previews_visible = false;
+                    None
+                };
+
+                Some(image_preview_status(&store.application, loading))
+            },
+
+            IambAction::ToggleImagePreviews => {
+                let loading = if store.application.image_previews_visible {
+                    store.application.image_previews_visible = false;
+                    None
+                } else {
+                    let media = store.application.worker.client.media();
+                    store.application.enable_image_previews();
+                    Some(store.application.load_image_previews(self.store.clone(), media))
+                };
+
+                Some(image_preview_status(&store.application, loading))
             },
 
             IambAction::Homeserver(act) => {

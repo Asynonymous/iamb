@@ -40,12 +40,14 @@ use matrix_sdk::{
             relation::{Replacement, Thread},
             room::encrypted::RoomEncryptedEvent,
             room::message::{
+                MessageType,
                 OriginalRoomMessageEvent,
                 Relation,
                 RoomMessageEvent,
                 RoomMessageEventContent,
                 RoomMessageEventContentWithoutRelation,
             },
+            room::MediaSource,
             room::redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
             tag::{TagName, Tags},
             AnySyncStateEvent,
@@ -59,6 +61,7 @@ use matrix_sdk::{
         RoomId,
         UserId,
     },
+    Media,
     RoomState as MatrixRoomState,
 };
 
@@ -89,7 +92,7 @@ use modalkit::{
     prelude::{CommandType, WordStyle},
 };
 
-use crate::config::ImagePreviewProtocolValues;
+use crate::config::{ImagePreviewProtocolValues, ImagePreviewSize, ImagePreviewValues};
 use crate::message::ImageStatus;
 use crate::notifications::NotificationHandle;
 use crate::preview::{source_from_event, spawn_insert_preview};
@@ -538,6 +541,12 @@ pub enum IambAction {
     /// Request a new verification with the specified user.
     VerifyRequest(String),
 
+    /// Set whether inline image previews are shown.
+    SetImagePreviews(bool),
+
+    /// Toggle whether inline image previews are shown.
+    ToggleImagePreviews,
+
     /// Toggle the focus within the focused room.
     ToggleScrollbackFocus,
 
@@ -593,6 +602,8 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => SequenceStatus::Break,
             IambAction::OpenLink(..) => SequenceStatus::Break,
             IambAction::Send(..) => SequenceStatus::Break,
+            IambAction::SetImagePreviews(_) => SequenceStatus::Break,
+            IambAction::ToggleImagePreviews => SequenceStatus::Break,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
             IambAction::VerifyRequest(..) => SequenceStatus::Break,
@@ -609,6 +620,8 @@ impl ApplicationAction for IambAction {
             IambAction::OpenLink(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
             IambAction::Send(..) => SequenceStatus::Atom,
+            IambAction::SetImagePreviews(_) => SequenceStatus::Atom,
+            IambAction::ToggleImagePreviews => SequenceStatus::Atom,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
             IambAction::Verify(..) => SequenceStatus::Atom,
             IambAction::VerifyRequest(..) => SequenceStatus::Atom,
@@ -625,6 +638,8 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => SequenceStatus::Ignore,
             IambAction::OpenLink(..) => SequenceStatus::Ignore,
             IambAction::Send(..) => SequenceStatus::Ignore,
+            IambAction::SetImagePreviews(_) => SequenceStatus::Ignore,
+            IambAction::ToggleImagePreviews => SequenceStatus::Ignore,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
             IambAction::VerifyRequest(..) => SequenceStatus::Ignore,
@@ -641,6 +656,8 @@ impl ApplicationAction for IambAction {
             IambAction::Keys(..) => false,
             IambAction::Send(..) => false,
             IambAction::OpenLink(..) => false,
+            IambAction::SetImagePreviews(_) => false,
+            IambAction::ToggleImagePreviews => false,
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
             IambAction::VerifyRequest(..) => false,
@@ -947,6 +964,16 @@ impl Default for RoomInfo {
     }
 }
 
+fn image_source_from_message(msg: &Message) -> Option<(OwnedEventId, MediaSource)> {
+    if let MessageEvent::Original(ev) = &msg.event {
+        if let MessageType::Image(content) = &ev.content.msgtype {
+            return Some((ev.event_id.clone(), content.source.clone()));
+        }
+    }
+
+    None
+}
+
 impl RoomInfo {
     pub fn get_thread(&self, root: Option<&EventId>) -> Option<&Messages> {
         if let Some(thread_root) = root {
@@ -1240,10 +1267,12 @@ impl RoomInfo {
         store: AsyncProgramStore,
         picker: Option<Picker>,
         ev: RoomMessageEvent,
+        image_previews_visible: bool,
         settings: &mut ApplicationSettings,
         media: matrix_sdk::Media,
     ) {
-        let source = picker.and_then(|_| source_from_event(&ev));
+        let source =
+            image_previews_visible.then(|| picker.and_then(|_| source_from_event(&ev))).flatten();
         self.insert(ev);
 
         if let Some((event_id, source)) = source {
@@ -1603,6 +1632,9 @@ pub struct ChatStore {
     /// Image preview "protocol" picker.
     pub picker: Option<Picker>,
 
+    /// Whether inline image previews should be loaded and displayed.
+    pub image_previews_visible: bool,
+
     /// Last draw time, used to match with RoomInfo's draw_last.
     pub draw_curr: Option<Instant>,
 
@@ -1623,6 +1655,7 @@ impl ChatStore {
     /// Create a new [ChatStore].
     pub fn new(worker: Requester, settings: ApplicationSettings) -> Self {
         let picker = picker_from_settings(&settings);
+        let image_previews_visible = settings.tunables.image_preview.is_some();
 
         ChatStore {
             worker,
@@ -1638,11 +1671,77 @@ impl ChatStore {
             verifications: Default::default(),
             need_load: Default::default(),
             sync_info: Default::default(),
+            image_previews_visible,
             draw_curr: None,
             ring_bell: false,
             focused: true,
             open_notifications: Default::default(),
         }
+    }
+
+    /// Enable image previews at runtime, using default preview settings if needed.
+    pub fn enable_image_previews(&mut self) {
+        self.image_previews_visible = true;
+
+        if self.settings.tunables.image_preview.is_none() {
+            self.settings.tunables.image_preview = Some(ImagePreviewValues {
+                size: ImagePreviewSize::default(),
+                protocol: None,
+            });
+        }
+
+        if self.picker.is_none() {
+            self.picker = picker_from_settings(&self.settings);
+        }
+    }
+
+    /// Load previews for image messages that are already in memory.
+    pub fn load_image_previews(&mut self, store: AsyncProgramStore, media: Media) -> usize {
+        if !self.image_previews_visible {
+            return 0;
+        }
+
+        if self.picker.is_none() || self.settings.tunables.image_preview.is_none() {
+            return 0;
+        }
+
+        let cache_dir = self.settings.dirs.image_previews.clone();
+        let image_preview_size =
+            self.settings.tunables.image_preview.as_ref().unwrap().size.clone();
+        let mut count = 0;
+        let room_ids = self.rooms.iter().map(|(room_id, _)| room_id.clone()).collect::<Vec<_>>();
+
+        for room_id in room_ids {
+            let Some(room) = self.rooms.get_mut(&room_id) else {
+                continue;
+            };
+
+            let messages =
+                std::iter::once(&mut room.messages).chain(room.threads.values_mut());
+
+            for msg in messages.flat_map(|messages| messages.values_mut()) {
+                if !matches!(msg.image_preview, ImageStatus::None | ImageStatus::Error(_)) {
+                    continue;
+                }
+
+                let Some((event_id, source)) = image_source_from_message(msg) else {
+                    continue;
+                };
+
+                msg.image_preview = ImageStatus::Downloading(image_preview_size.clone());
+                spawn_insert_preview(
+                    store.clone(),
+                    room_id.clone(),
+                    event_id,
+                    source,
+                    media.clone(),
+                    cache_dir.clone(),
+                );
+                count += 1;
+            }
+        }
+
+        count
     }
 
     /// Get a joined room.

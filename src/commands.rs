@@ -701,6 +701,24 @@ fn iamb_open(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_images(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() > 1 || desc.bang {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let iact = match args.pop().as_deref() {
+        None | Some("toggle") => IambAction::ToggleImagePreviews,
+        Some("show") | Some("on") | Some("enable") => IambAction::SetImagePreviews(true),
+        Some("hide") | Some("off") | Some("disable") => IambAction::SetImagePreviews(false),
+        Some(_) => return Result::Err(CommandError::InvalidArgument),
+    };
+    let step = CommandStep::Continue(iact.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn iamb_logout(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let args = desc.arg.strings()?;
 
@@ -741,6 +759,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
     });
     cmds.add_command(ProgramCommand { name: "open".into(), aliases: vec![], f: iamb_open });
     cmds.add_command(ProgramCommand { name: "edit".into(), aliases: vec![], f: iamb_edit });
+    cmds.add_command(ProgramCommand {
+        name: "images".into(),
+        aliases: vec!["imagepreview".into(), "imagepreviews".into()],
+        f: iamb_images,
+    });
     cmds.add_command(ProgramCommand {
         name: "invite".into(),
         aliases: vec![],
@@ -851,6 +874,30 @@ mod tests {
     use matrix_sdk::ruma::{room_id, user_id};
     use modalkit::actions::WindowAction;
     use modalkit::editing::context::EditContext;
+
+    #[test]
+    fn test_cmd_images() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        let res = cmds.input_cmd(":images", ctx.clone()).unwrap();
+        let act = IambAction::ToggleImagePreviews;
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd(":images show", ctx.clone()).unwrap();
+        let act = IambAction::SetImagePreviews(true);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd(":images hide", ctx.clone()).unwrap();
+        let act = IambAction::SetImagePreviews(false);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd(":images extra", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd(":images!", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
 
     #[test]
     fn test_cmd_verify() {

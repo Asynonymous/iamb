@@ -709,6 +709,7 @@ impl<'a> MessageFormatter<'a> {
         &mut self,
         msg: &'a Message,
         style: Style,
+        image_previews_visible: bool,
         text: &mut Text<'a>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
@@ -721,7 +722,8 @@ impl<'a> MessageFormatter<'a> {
 
         let width = self.width();
         let w = width.saturating_sub(2);
-        let (mut replied, proto) = msg.show_msg(w, reply_style, true, settings);
+        let (mut replied, proto) =
+            msg.show_msg(w, reply_style, true, image_previews_visible, settings);
         let mut sender = msg.sender_span(info, self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
@@ -978,6 +980,7 @@ impl Message {
         &'a self,
         prev: Option<&Message>,
         selected: bool,
+        image_previews_visible: bool,
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
@@ -996,11 +999,12 @@ impl Message {
             .and_then(|e| info.get_event(&e));
         let proto_reply = reply.as_ref().and_then(|r| {
             // Format the reply header, push it into the `Text` buffer, and get any image.
-            fmt.push_in_reply(r, style, &mut text, info, settings)
+            fmt.push_in_reply(r, style, image_previews_visible, &mut text, info, settings)
         });
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
-        let (msg, proto) = self.show_msg(width, style, reply.is_some(), settings);
+        let (msg, proto) =
+            self.show_msg(width, style, reply.is_some(), image_previews_visible, settings);
 
         // Given our text so far, determine the image offset.
         let proto_main = proto.map(|p| {
@@ -1039,7 +1043,7 @@ impl Message {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
     ) -> Text<'a> {
-        self.show_with_preview(prev, selected, vwctx, info, settings).0
+        self.show_with_preview(prev, selected, true, vwctx, info, settings).0
     }
 
     fn show_msg<'a>(
@@ -1047,6 +1051,7 @@ impl Message {
         width: usize,
         style: Style,
         hide_reply: bool,
+        image_previews_visible: bool,
         settings: &'a ApplicationSettings,
     ) -> (Text<'a>, Option<&'a Protocol>) {
         if let Some(html) = &self.html {
@@ -1062,16 +1067,20 @@ impl Message {
             }
 
             let mut proto = None;
-            let placeholder = match &self.image_preview {
-                ImageStatus::None => None,
-                ImageStatus::Downloading(image_preview_size) => {
-                    placeholder_frame(Some("Downloading..."), width, image_preview_size)
-                },
-                ImageStatus::Loaded(backend) => {
-                    proto = Some(backend);
-                    placeholder_frame(Some("No Space..."), width, &backend.area().into())
-                },
-                ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),
+            let placeholder = if image_previews_visible {
+                match &self.image_preview {
+                    ImageStatus::None => None,
+                    ImageStatus::Downloading(image_preview_size) => {
+                        placeholder_frame(Some("Downloading..."), width, image_preview_size)
+                    },
+                    ImageStatus::Loaded(backend) => {
+                        proto = Some(backend);
+                        placeholder_frame(Some("No Space..."), width, &backend.area().into())
+                    },
+                    ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),
+                }
+            } else {
+                None
             };
 
             if let Some(placeholder) = placeholder {

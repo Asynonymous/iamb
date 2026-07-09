@@ -1344,11 +1344,18 @@ impl StatefulWidget for Scrollback<'_> {
         let mut lines = vec![];
         let mut sawit = false;
         let mut prev = prevmsg(&corner_key, thread);
+        let image_previews_visible = self.store.application.image_previews_visible;
 
         for (key, item) in thread.range(&corner_key..) {
             let sel = key == cursor_key;
-            let (txt, [mut msg_preview, mut reply_preview]) =
-                item.show_with_preview(prev, foc && sel, &state.viewctx, info, settings);
+            let (txt, [mut msg_preview, mut reply_preview]) = item.show_with_preview(
+                prev,
+                foc && sel,
+                image_previews_visible,
+                &state.viewctx,
+                info,
+                settings,
+            );
 
             let incomplete_ok = !full || !sel;
 

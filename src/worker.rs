@@ -323,7 +323,15 @@ fn load_insert(
     store: AsyncProgramStore,
     message_needs: Vec<MessageNeed>,
 ) {
-    let ChatStore { presences, rooms, worker, picker, settings, .. } = &mut locked.application;
+    let ChatStore {
+        presences,
+        rooms,
+        worker,
+        picker,
+        settings,
+        image_previews_visible,
+        ..
+    } = &mut locked.application;
     let info = rooms.get_or_default(room_id.clone());
     info.fetching = false;
     let client = &worker.client;
@@ -348,6 +356,7 @@ fn load_insert(
                             store.clone(),
                             picker.clone(),
                             msg,
+                            *image_previews_visible,
                             settings,
                             client.media(),
                         );
@@ -1010,7 +1019,8 @@ impl ClientWorker {
                     let sender = ev.sender().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
-                    let ChatStore { rooms, picker, settings, .. } = &mut locked.application;
+                    let ChatStore { rooms, picker, settings, image_previews_visible, .. } =
+                        &mut locked.application;
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     update_event_receipts(info, &room, ev.event_id()).await;
@@ -1021,6 +1031,7 @@ impl ClientWorker {
                         store.clone(),
                         picker.clone(),
                         full_ev,
+                        *image_previews_visible,
                         settings,
                         client.media(),
                     );
