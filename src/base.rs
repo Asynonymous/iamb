@@ -617,6 +617,12 @@ pub enum IambAction {
 
     /// Clear all unread messages.
     ClearUnreads,
+
+    /// Set whether image previews are shown for the current session.
+    SetImagePreviews(bool),
+
+    /// Toggle whether image previews are shown for the current session.
+    ToggleImagePreviews,
 }
 
 impl IambAction {
@@ -667,6 +673,8 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => SequenceStatus::Break,
             IambAction::OpenLink(..) => SequenceStatus::Break,
             IambAction::Send(..) => SequenceStatus::Break,
+            IambAction::SetImagePreviews(_) => SequenceStatus::Break,
+            IambAction::ToggleImagePreviews => SequenceStatus::Break,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
             IambAction::VerifyRequest(..) => SequenceStatus::Break,
@@ -683,6 +691,8 @@ impl ApplicationAction for IambAction {
             IambAction::OpenLink(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
             IambAction::Send(..) => SequenceStatus::Atom,
+            IambAction::SetImagePreviews(_) => SequenceStatus::Atom,
+            IambAction::ToggleImagePreviews => SequenceStatus::Atom,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
             IambAction::Verify(..) => SequenceStatus::Atom,
             IambAction::VerifyRequest(..) => SequenceStatus::Atom,
@@ -699,6 +709,8 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => SequenceStatus::Ignore,
             IambAction::OpenLink(..) => SequenceStatus::Ignore,
             IambAction::Send(..) => SequenceStatus::Ignore,
+            IambAction::SetImagePreviews(_) => SequenceStatus::Ignore,
+            IambAction::ToggleImagePreviews => SequenceStatus::Ignore,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
             IambAction::VerifyRequest(..) => SequenceStatus::Ignore,
@@ -714,6 +726,8 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => false,
             IambAction::Keys(..) => false,
             IambAction::Send(..) => false,
+            IambAction::SetImagePreviews(_) => false,
+            IambAction::ToggleImagePreviews => false,
             IambAction::OpenLink(..) => false,
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
@@ -1908,6 +1922,24 @@ impl ChatStore {
             focused: true,
             open_notifications: Default::default(),
         }
+    }
+
+    /// Enable or disable image previews without modifying the configuration file.
+    ///
+    /// Recreating the manager when previews are enabled lets it detect the terminal protocol
+    /// after starting with previews disabled. Visible messages are registered lazily on redraw.
+    pub fn set_image_previews(&mut self, enabled: bool) -> bool {
+        if self.settings.tunables.image_preview.enabled == enabled {
+            return false;
+        }
+
+        self.settings.tunables.image_preview.enabled = enabled;
+
+        if enabled {
+            self.previews = PreviewManager::new(&self.settings);
+        }
+
+        true
     }
 
     /// Get a joined room.

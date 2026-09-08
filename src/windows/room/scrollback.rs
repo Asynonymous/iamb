@@ -1380,6 +1380,12 @@ impl StatefulWidget for Scrollback<'_> {
         if settings.tunables.image_preview.enabled {
             for (key, item) in thread.range(&corner_key..).rev() {
                 if let Some(source) = item.image_preview() {
+                    self.store.application.previews.register_preview(
+                        settings,
+                        source,
+                        PreviewKind::Message,
+                        &self.store.application.worker,
+                    );
                     self.store.application.previews.load(
                         source,
                         PreviewKind::Message,
@@ -1392,6 +1398,12 @@ impl StatefulWidget for Scrollback<'_> {
                     .and_then(|e| info.get_event(&e))
                     .and_then(|msg| msg.image_preview());
                 if let Some(source) = reply {
+                    self.store.application.previews.register_preview(
+                        settings,
+                        source,
+                        PreviewKind::Message,
+                        &self.store.application.worker,
+                    );
                     self.store.application.previews.load(
                         source,
                         PreviewKind::Message,
@@ -1400,6 +1412,12 @@ impl StatefulWidget for Scrollback<'_> {
                 }
                 if let Some(event_id) = key.id.as_origin() {
                     for source in info.get_reaction_images(event_id) {
+                        self.store.application.previews.register_preview(
+                            settings,
+                            source,
+                            PreviewKind::Reaction,
+                            &self.store.application.worker,
+                        );
                         self.store.application.previews.load(
                             source,
                             PreviewKind::Reaction,
