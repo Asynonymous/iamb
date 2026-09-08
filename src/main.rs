@@ -582,6 +582,25 @@ impl Application {
                 None
             },
 
+            IambAction::SetImagePreviews(enabled) => {
+                store.application.set_image_previews(enabled);
+                Some(if enabled {
+                    "Image previews shown for this session".into()
+                } else {
+                    "Image previews hidden for this session".into()
+                })
+            },
+
+            IambAction::ToggleImagePreviews => {
+                let enabled = !store.application.settings.tunables.image_preview.enabled;
+                store.application.set_image_previews(enabled);
+                Some(if enabled {
+                    "Image previews shown for this session".into()
+                } else {
+                    "Image previews hidden for this session".into()
+                })
+            },
+
             IambAction::ToggleScrollbackFocus => {
                 self.screen.current_window_mut()?.focus_toggle();
 
